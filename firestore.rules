@@ -1,0 +1,39 @@
+rules_version = '2';
+
+// Every document lives under users/{uid}. Only the signed-in owner can read or write it.
+// `plan` (trial / premium) and `usage` (AI quota) are written by Cloud Functions only.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function touchesPrivilegedFields() {
+      return resource == null
+        ? request.resource.data.keys().hasAny(['plan', 'usage'])
+        : request.resource.data.diff(resource.data).affectedKeys().hasAny(['plan', 'usage']);
+    }
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow create, update: if isOwner(uid) && !touchesPrivilegedFields();
+      allow delete: if false; // use the deleteAccount function
+
+      match /{collection}/{docId} {
+        allow read, delete: if isOwner(uid)
+          && collection in ['mistakes', 'circumstances', 'checkins', 'goals', 'habits', 'habitLogs', 'prayers'];
+        allow create, update: if isOwner(uid)
+          && collection in ['mistakes', 'circumstances', 'checkins', 'goals', 'habits', 'habitLogs', 'prayers']
+          && request.resource.data.id == docId
+          && request.resource.data.updatedAt is number
+          && request.resource.size() < 100 * 1024;
+      }
+    }
+
+    // Everything else is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
