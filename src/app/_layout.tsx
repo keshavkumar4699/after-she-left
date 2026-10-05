@@ -17,8 +17,9 @@ import { onUserChanged } from '@/services/firebase';
 import { syncGeofences } from '@/services/geofence';
 import { useAppLockDriver, useSecureScreen } from '@/services/lock';
 import { setupNotifications, useNotificationResponses, useReminderSync } from '@/services/notifications';
+import { prepareOnDeviceAi } from '@/services/onDeviceAi';
 import { startSync } from '@/services/sync';
-import { useClockDriver } from '@/store/hooks';
+import { useClockDriver, usePlanInfo } from '@/store/hooks';
 import { useStore } from '@/store/useStore';
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider';
 import { SnackbarHost } from '@/ui';
@@ -60,6 +61,8 @@ function AppShell() {
   const secureScreen = useStore((s) => s.settings.secureScreen);
   const circumstances = useStore((s) => s.circumstances);
   const geofencesOn = useStore((s) => s.settings.reminders.geofences);
+  const aiPrayer = useStore((s) => s.settings.aiPrayer);
+  const { isPremium } = usePlanInfo();
 
   useAppLockDriver(true);
   useSecureScreen(secureScreen);
@@ -75,6 +78,11 @@ function AppShell() {
   useEffect(() => {
     if (onboarded) syncGeofences();
   }, [onboarded, circumstances, geofencesOn]);
+
+  // Trial/Premium: get Gemini Nano ready on supported phones so prayers are written on-device.
+  useEffect(() => {
+    if (isPremium && aiPrayer) prepareOnDeviceAi().catch(() => {});
+  }, [isPremium, aiPrayer]);
 
   // Cloud: when a user signs in, start sync and link purchases to their account.
   useEffect(() => {

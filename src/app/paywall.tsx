@@ -14,7 +14,7 @@ import { Badge, Button, Card, Icon, Screen, Text, toast, type IconName } from '@
 
 const PERKS: { icon: IconName; title: string; text: string }[] = [
   { icon: 'infinity', title: 'Unlimited habits, goals and lessons', text: 'Build your whole system, not just part of it.' },
-  { icon: 'hands-pray', title: 'AI prayer every day', text: 'Written for the day you are actually having, with 2 rewrites a day.' },
+  { icon: 'hands-pray', title: 'AI prayer every day', text: 'Written for the day you are actually having, privately on your phone where supported, with 2 rewrites a day.' },
   { icon: 'map-marker-radius-outline', title: 'Reminders at every place and time', text: 'Up to 95 places and unlimited scheduled moments.' },
   { icon: 'chart-box-outline', title: 'Full insights and history', text: 'See your toughest moments and your whole journey.' },
   { icon: 'cancel', title: 'No ads, ever', text: 'Nothing between you and your focus.' },

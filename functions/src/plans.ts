@@ -15,8 +15,9 @@ export interface ServerPlan {
   premiumUntil?: number | null;
 }
 
+/** Cloud AI prayers. Free prayers are composed on the phone, so the free plan gets none. */
 export const AI_LIMITS: Record<'free' | 'premium', { perWeek: number; regenPerDay: number }> = {
-  free: { perWeek: 3, regenPerDay: 0 },
+  free: { perWeek: 0, regenPerDay: 0 },
   premium: { perWeek: 7, regenPerDay: 2 },
 };
 

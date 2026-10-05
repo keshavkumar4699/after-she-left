@@ -31,7 +31,8 @@ export const LIMITS: Record<'free' | 'premium', Limits> = {
     mistakes: 25,
     locationCircumstances: 1,
     scheduledCircumstances: 3,
-    aiPrayersPerWeek: 3,
+    // Free prayers are composed on the phone; cloud AI is a Premium feature.
+    aiPrayersPerWeek: 0,
     regenerationsPerDay: 0,
     monthHistoryMonths: 3,
     fullInsights: false,
@@ -121,7 +122,7 @@ export const PLAN_FEATURES: { label: string; free: string; premium: string }[] =
   { label: 'Lessons (mistakes)', free: '25', premium: 'Unlimited' },
   { label: 'Location reminders', free: '1', premium: 'Up to 95' },
   { label: 'Scheduled reminders', free: '3', premium: 'Unlimited' },
-  { label: 'AI daily prayer', free: '3 per week', premium: 'Daily + 2 rewrites' },
+  { label: 'Daily prayer', free: 'Composed on your phone', premium: 'AI-written daily + 2 rewrites' },
   { label: 'Habit history', free: '3 months', premium: 'Full' },
   { label: 'Insights', free: 'Basic', premium: 'Full' },
   { label: 'Ads', free: 'Yes', premium: 'None' },

@@ -1,7 +1,7 @@
 /**
  * Firebase Cloud Functions for After She Left.
  *
- *  generateDailyPrayer  callable   AI prayer via the Claude API (quota enforced server-side)
+ *  generateDailyPrayer  callable   cloud AI prayer via Claude Haiku 4.5 (Premium; quota enforced server-side)
  *  onUserCreated        auth       starts the 14-day trial on the server
  *  deleteAccount        callable   erases the user's cloud data and account
  *  revenuecatWebhook    https      subscription events → users/{uid}.plan

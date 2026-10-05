@@ -1,14 +1,22 @@
 import { toDayKey } from '@/domain/dates';
+import { effectiveTier } from '@/domain/entitlements';
 import { analyzeNeeds, buildPrayerContext, type PrayerContext } from '@/domain/needs';
 import { composeTemplatePrayer, openingOf } from '@/domain/prayer';
-import type { FocusTheme, Mood, Prayer, PrayerContent } from '@/domain/types';
+import { prayerEngineOrder, templateReason, type EngineInput, type TemplateReason } from '@/domain/prayerEngine';
+import type { DayKey, FocusTheme, Mood, Prayer, PrayerContent } from '@/domain/types';
 import { liveValues, useStore } from '@/store/useStore';
 import { callFunction, currentUser } from './firebase';
+import { generateOnDevice, getNanoStatus } from './onDeviceAi';
 
 export interface PrayerResult {
   prayer: Prayer;
-  /** Why the AI wasn't used, when it wasn't. */
-  fallbackReason?: 'offline' | 'not-signed-in' | 'disabled' | 'quota' | 'error';
+  /** Why no AI wrote it, when the template was used. */
+  fallbackReason?: TemplateReason | 'error';
+}
+
+interface PrayerOptions {
+  regenerate?: boolean;
+  mood?: Mood | null;
 }
 
 const THEMES: FocusTheme[] = ['resist', 'discipline', 'forgiveness', 'courage', 'purpose', 'gratitude'];
@@ -26,16 +34,31 @@ function isPrayerContent(x: unknown): x is PrayerContent {
   );
 }
 
-/**
- * Today's prayer. Uses the AI Cloud Function when the user is signed in, has opted in and has
- * quota left; otherwise composes a personal template prayer on the device.
- */
-export async function ensureTodayPrayer(opts: { regenerate?: boolean; mood?: Mood | null } = {}): Promise<PrayerResult> {
-  const state = useStore.getState();
-  const day = toDayKey();
-  const existing = state.prayers[day];
-  if (existing && !opts.regenerate) return { prayer: existing };
+let inflight: { day: DayKey; promise: Promise<PrayerResult> } | null = null;
 
+/**
+ * Today's prayer. Engines are tried cheapest and most private first (see `prayerEngineOrder`):
+ * Gemini Nano on the phone, then the cloud function, then the template composer, which always
+ * works. Concurrent first-time calls (dashboard + prayer screen) share one generation.
+ */
+export function ensureTodayPrayer(opts: PrayerOptions = {}): Promise<PrayerResult> {
+  const day = toDayKey();
+  if (!opts.regenerate) {
+    const existing = useStore.getState().prayers[day];
+    if (existing) return Promise.resolve({ prayer: existing });
+    if (inflight?.day === day) return inflight.promise;
+  }
+  const promise = writePrayer(day, opts).finally(() => {
+    if (inflight?.promise === promise) inflight = null;
+  });
+  inflight = { day, promise };
+  return promise;
+}
+
+async function writePrayer(day: DayKey, opts: PrayerOptions): Promise<PrayerResult> {
+  const state = useStore.getState();
+  const existing = state.prayers[day];
+  const regenerate = !!opts.regenerate;
   const mood = opts.mood ?? (state.todayMood?.day === day ? state.todayMood.mood : null);
   const needs = analyzeNeeds({
     mistakes: liveValues(state.mistakes),
@@ -53,55 +76,78 @@ export async function ensureTodayPrayer(opts: { regenerate?: boolean; mood?: Moo
     .slice(0, 7)
     .map((p) => openingOf(p.text));
 
-  const regenerations = (existing?.regenerations ?? 0) + (opts.regenerate ? 1 : 0);
+  const regenerations = (existing?.regenerations ?? 0) + (regenerate ? 1 : 0);
   const t = Date.now();
-  const base = {
-    id: day,
-    day,
-    saved: existing?.saved ?? false,
-    helped: null,
-    mood,
-    regenerations,
-    createdAt: existing?.createdAt ?? t,
-    updatedAt: t,
+  const save = (content: PrayerContent, source: Prayer['source']): Prayer => {
+    const prayer: Prayer = {
+      id: day,
+      day,
+      ...content,
+      source,
+      saved: existing?.saved ?? false,
+      helped: null,
+      mood,
+      regenerations,
+      createdAt: existing?.createdAt ?? t,
+      updatedAt: Date.now(),
+    };
+    useStore.getState().savePrayer(prayer);
+    return prayer;
   };
 
-  let fallbackReason: PrayerResult['fallbackReason'];
-  const allowance = state.aiAllowance(!!opts.regenerate);
-  if (!state.settings.aiPrayer) fallbackReason = 'disabled';
-  else if (!currentUser()) fallbackReason = 'not-signed-in';
-  else if (!allowance.ok) fallbackReason = 'quota';
-  else {
-    try {
-      const context: PrayerContext = buildPrayerContext(needs, {
-        day,
-        style: state.settings.prayerStyle,
-        addressee: state.settings.prayerAddressee,
-        name: state.settings.displayName,
-        mood,
-        recentOpenings,
-      });
-      const content = await callFunction<{ context: PrayerContext; regenerate: boolean }, PrayerContent>('generateDailyPrayer', {
-        context,
-        regenerate: !!opts.regenerate,
-      });
-      if (!isPrayerContent(content)) throw new Error('Malformed prayer');
-      state.recordAiUse(!!opts.regenerate);
-      const prayer: Prayer = { ...base, ...content, source: 'ai' };
-      state.savePrayer(prayer);
-      return { prayer };
-    } catch (e) {
-      console.warn('[prayer] AI generation failed, using template', e);
-      fallbackReason = 'error';
-    }
-  }
-
-  const content = composeTemplatePrayer(
+  // Always composed: it is the final fallback, and it supplies the purpose line, "not today"
+  // lines and nudges for on-device prayers (deterministic, so they stay reliable).
+  const template = composeTemplatePrayer(
     needs,
     { day, style: state.settings.prayerStyle, addressee: state.settings.prayerAddressee },
     regenerations,
   );
-  const prayer: Prayer = { ...base, ...content, source: 'template' };
-  state.savePrayer(prayer);
-  return { prayer, fallbackReason };
+
+  const tier = effectiveTier(state.plan, t);
+  const aiEnabled = state.settings.aiPrayer;
+  const input: EngineInput = {
+    tier,
+    aiEnabled,
+    // Only paying/trial users ever touch the model, so free users never trigger AICore.
+    nanoStatus: tier !== 'free' && aiEnabled ? await getNanoStatus() : 'unknown',
+    signedIn: !!currentUser(),
+    cloudAllowanceOk: state.aiAllowance(regenerate).ok,
+  };
+  const context = (): PrayerContext =>
+    buildPrayerContext(needs, {
+      day,
+      style: state.settings.prayerStyle,
+      addressee: state.settings.prayerAddressee,
+      name: state.settings.displayName,
+      mood,
+      recentOpenings,
+    });
+
+  let failed = false;
+  for (const engine of prayerEngineOrder(input)) {
+    if (engine === 'on-device-ai') {
+      try {
+        const nano = await generateOnDevice(context());
+        return { prayer: save({ ...template, title: nano.title ?? template.title, text: nano.text }, 'on-device') };
+      } catch (e) {
+        console.warn('[prayer] on-device generation failed', e);
+        failed = true;
+      }
+    } else if (engine === 'cloud') {
+      try {
+        const content = await callFunction<{ context: PrayerContext; regenerate: boolean }, PrayerContent>('generateDailyPrayer', {
+          context: context(),
+          regenerate,
+        });
+        if (!isPrayerContent(content)) throw new Error('Malformed prayer');
+        useStore.getState().recordAiUse(regenerate);
+        return { prayer: save(content, 'ai') };
+      } catch (e) {
+        console.warn('[prayer] cloud generation failed', e);
+        failed = true;
+      }
+    }
+  }
+
+  return { prayer: save(template, 'template'), fallbackReason: failed ? 'error' : (templateReason(input) ?? undefined) };
 }

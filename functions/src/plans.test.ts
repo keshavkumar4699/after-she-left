@@ -13,7 +13,7 @@ test('trial, premium and free tiers', () => {
   // No plan document yet: fall back to the account creation time.
   assert.equal(effectiveTier(undefined, NOW, NOW - 3 * DAY_MS), 'trial');
   assert.equal(effectiveTier(undefined, NOW, NOW - 20 * DAY_MS), 'free');
-  assert.deepEqual(aiLimits('free'), { perWeek: 3, regenPerDay: 0 });
+  assert.deepEqual(aiLimits('free'), { perWeek: 0, regenPerDay: 0 });
   assert.deepEqual(aiLimits('trial'), { perWeek: 7, regenPerDay: 2 });
 });
 

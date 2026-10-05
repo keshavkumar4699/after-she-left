@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { View } from 'react-native';
 
+import { PrayerEngineStatus } from '@/features/prayer/EngineStatus';
 import { STYLE_OPTIONS } from '@/features/prayer/styles';
 import { ensureTodayPrayer } from '@/services/prayer';
 import { usePlanInfo, useToday } from '@/store/hooks';
@@ -14,7 +15,7 @@ export default function PrayerSettings() {
   const updateSettings = useStore((s) => s.updateSettings);
   const today = useToday();
   const prayer = useStore((s) => s.prayers[today]);
-  const { limits, tier } = usePlanInfo();
+  const { isPremium } = usePlanInfo();
   const [busy, setBusy] = useState(false);
 
   return (
@@ -35,15 +36,31 @@ export default function PrayerSettings() {
         <TimeField label="Morning reminder" value={settings.prayerTime} onChange={(t) => updateSettings({ prayerTime: t })} />
       </FormSection>
 
-      <FormSection title="Written by AI" description={`${tier === 'free' ? `${limits.aiPrayersPerWeek} AI prayers a week on the free plan; other days use a prayer composed on your phone.` : 'Every day, plus 2 rewrites a day.'}`}>
-        <ListItem
-          icon="star-four-points-outline"
-          title="Use AI"
-          subtitle="Requires sign-in. Only a short summary is sent."
-          chevron={false}
-          trailing={<Switch value={settings.aiPrayer} onChange={(v) => updateSettings({ aiPrayer: v })} label="Use AI" />}
-        />
-      </FormSection>
+      {isPremium ? (
+        <FormSection
+          title="Written by AI"
+          description="Every day, plus 2 rewrites a day. On supported phones Gemini Nano writes it on the phone; otherwise it is written in the cloud.">
+          <ListItem
+            icon="star-four-points-outline"
+            title="Use AI"
+            subtitle="Off: prayers are composed from your lessons"
+            chevron={false}
+            trailing={<Switch value={settings.aiPrayer} onChange={(v) => updateSettings({ aiPrayer: v })} label="Use AI" />}
+          />
+          {settings.aiPrayer ? <PrayerEngineStatus /> : null}
+        </FormSection>
+      ) : (
+        <FormSection
+          title="Written by AI"
+          description="On the free plan your prayer is composed on your phone from your lessons, goals and habits. Premium writes it with AI every day.">
+          <ListItem
+            icon="star-four-points-outline"
+            title="AI-written prayers"
+            subtitle="Premium: on your phone where supported"
+            onPress={() => router.push('/paywall')}
+          />
+        </FormSection>
+      )}
 
       {prayer ? (
         <Card variant="prayer" padding={18} onPress={() => router.push('/prayer')} accessibilityLabel="Open today's prayer">

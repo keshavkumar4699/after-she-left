@@ -222,7 +222,8 @@ export interface PrayerContent {
 export interface Prayer extends PrayerContent {
   id: DayKey;
   day: DayKey;
-  source: 'ai' | 'template';
+  /** ai = cloud model, on-device = Gemini Nano on the phone, template = composed on the phone. */
+  source: 'ai' | 'on-device' | 'template';
   saved: boolean;
   helped?: boolean | null;
   mood?: Mood | null;

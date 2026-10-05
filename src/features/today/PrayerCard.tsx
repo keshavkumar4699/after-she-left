@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { View } from 'react-native';
 
 import { THEME_LABELS } from '@/domain/needs';
+import { isAiWritten } from '@/features/prayer/source';
 import { ensureTodayPrayer } from '@/services/prayer';
 import { useToday } from '@/store/hooks';
 import { useStore } from '@/store/useStore';
@@ -45,7 +46,7 @@ export function PrayerCard() {
           <Text variant="overline" tone="muted" style={{ flex: 1 }}>
             Today&apos;s prayer · {THEME_LABELS[prayer.theme]}
           </Text>
-          {prayer.source === 'ai' ? <Icon name="star-four-points" size={14} color={colors.violet} /> : null}
+          {isAiWritten(prayer.source) ? <Icon name="star-four-points" size={14} color={colors.violet} /> : null}
         </View>
         <Text variant="title" style={{ fontSize: 24, lineHeight: 30 }}>
           {prayer.title}

@@ -61,7 +61,7 @@ repository. Screenshots live in [`docs/screenshots`](docs/screenshots).
 | **Goal** | Specific, dated, measurable | title, **affirmation written as already achieved**, measure, **real** target date, optional time, place, why, milestones, linked habits |
 | **Habit** | Identity-based, weekly-target habit | identity, two-minute + full version, level, **weekly target**, preferred days, time window, implementation intention, stack anchor, reward, temptation bundle, hard flag |
 | **Habit log** | One per habit per planned day | `habitId_day`, status planned / done / skipped, difficulty rating |
-| **Prayer** | Today's prayer | title, text, purpose line, "not today" list, 3 nudges, theme, source (AI/template) |
+| **Prayer** | Today's prayer | title, text, purpose line, "not today" list, 3 nudges, theme, source (cloud AI / on-device AI / template) |
 | **Plan** | Pricing state | tier trial / premium / free, trial end, premium until, source local/server |
 
 > Goal dates are picked from a calendar grid, so only real dates exist: 29 February can only be
@@ -80,7 +80,7 @@ repository. Screenshots live in [`docs/screenshots`](docs/screenshots).
 | | Habit viewer: Previous · Now · Next with Week/Month views, "Other habits" sheet | ✅ Built |
 | Dashboard | Prayer card, **last-7-days rings**, today's checklist, lessons today, goal affirmation | ✅ Built |
 | Goals | Specificity checklist, "write it for me" affirmation, milestones, linked habits | ✅ Built |
-| Prayer | Needs analyzer + on-device template composer; AI via Cloud Function + Claude | ✅ Built |
+| Prayer | Needs analyzer + template composer (free); Premium AI: Gemini Nano on the phone, else Claude Haiku 4.5 via a Cloud Function | ✅ Built (Gemini Nano needs on-device QA) |
 | Pricing | 14-day trial, $20/month Premium (RevenueCat), free tier with limits + ads (AdMob) | ✅ Built |
 | Privacy | Biometric/PIN lock, FLAG_SECURE, private notifications, JSON export | ✅ Built |
 | Cloud | Email sign-in, Firestore sync (last-write-wins), server-owned plan & quota | ✅ Built (needs a Firebase project) |
@@ -96,7 +96,8 @@ repository. Screenshots live in [`docs/screenshots`](docs/screenshots).
 | Animation | **Reanimated 4** (`.get()/.set()` for React Compiler), react-native-svg | Rings, accordions, sheets, checkbox pop |
 | Fonts | Inter (UI) + Fraunces (prayers, titles) via `@expo-google-fonts` | Calm, editorial feel |
 | Cloud (optional) | **Firebase JS SDK v12** (Auth + Firestore + Functions) | Works in Expo Go and on the web; activated by env vars |
-| AI | **Claude API** (`claude-opus-5-5`, effort `low`, structured JSON output, server-side refusal fallback) from a Cloud Function | Key stays in Secret Manager; quota enforced server-side |
+| On-device AI | **Gemini Nano** via the ML Kit GenAI Prompt API (`com.google.mlkit:genai-prompt`), local Expo module `modules/gemini-nano`; `minSdkVersion 26` via `expo-build-properties` | $0 per prayer and nothing leaves the phone; Android AICore ships and updates the model |
+| Cloud AI | **Claude API** (`claude-haiku-4-5`, structured JSON output) from a Cloud Function, only for Premium phones without Gemini Nano | Key stays in Secret Manager; quota enforced server-side; ~$0.004 per prayer |
 | Notifications | `expo-notifications` local schedules, channels and action buttons | No push server needed |
 | Location | `expo-location` geofencing + `expo-task-manager` | Reminders when arriving at/leaving places |
 | Background | `expo-background-task` | Twice-daily refresh of the 7-day reminder window |
@@ -111,9 +112,11 @@ repository. Screenshots live in [`docs/screenshots`](docs/screenshots).
 `EXPO_PUBLIC_FIREBASE_*` variables are present.
 
 **Alternatives considered:** Supabase (great, but Firebase Auth + Functions + Firestore offline fit
-better), bare React Native CLI (more native maintenance), Notifee (expo-notifications is enough),
-on-device LLM (too heavy for a daily 150-word prayer), `react-native-iap` without RevenueCat (would
-need our own receipt validation server).
+better), bare React Native CLI (more native maintenance), Notifee (expo-notifications is enough), a
+bundled on-device LLM such as llama.cpp (hundreds of MB in the APK; Gemini Nano is used instead
+because Android ships the model), free hosted models (rate limits and data-use terms unsuitable for
+personal content), `react-native-iap` without RevenueCat (would need our own receipt validation
+server).
 
 ## 5. Architecture
 
@@ -131,6 +134,7 @@ flowchart TB
     Store <--> Sync["Sync service\n(last-write-wins)"]
     UI --> Billing["Billing\n(RevenueCat)"]
     UI --> Ads["Ads (AdMob, free tier)"]
+    UI --> Nano["Gemini Nano\n(AICore, Premium on supported phones)"]
   end
   subgraph Cloud["Firebase (optional)"]
     Auth["Auth"]
@@ -138,7 +142,7 @@ flowchart TB
     Fn["Cloud Functions\ngenerateDailyPrayer · onUserCreated ·\ndeleteAccount · revenuecatWebhook"]
   end
   Sync <--> FS
-  Fn --> Claude["Claude API"]
+  Fn --> Claude["Claude API\n(Haiku 4.5)"]
   Fn --> FS
   RC["RevenueCat"] -- webhook --> Fn
   Billing --> RC
@@ -252,22 +256,36 @@ so a quote returns only after the whole library has been used.
 
 ## 9. Daily prayer (AI)
 
+Three engines, cheapest and most private first (`src/domain/prayerEngine.ts`, tested). Each one
+falls through to the next on any error, so the user always gets a prayer.
+
+| Who | Engine | Cost | Data sent |
+|---|---|---|---|
+| Free plan | **Template composer** on the phone (`composeTemplatePrayer`) | $0 | Nothing |
+| Trial / Premium on a supported phone (Pixel 10, Galaxy S24/S25, Fold/Flip 6, some Xiaomi, Motorola, Honor…) | **Gemini Nano** on the phone (ML Kit GenAI Prompt API) | $0 | Nothing |
+| Trial / Premium on other phones (signed in) | **Claude Haiku 4.5** via `generateDailyPrayer` | ~$0.004 | Compact summary (below) |
+
 ```mermaid
 sequenceDiagram
   participant App
   participant Needs as Needs analyzer (device)
+  participant Nano as Gemini Nano (device)
   participant Fn as generateDailyPrayer
-  participant Claude
+  participant Claude as Claude Haiku 4.5
   App->>Needs: mistakes, check-ins, circumstances, habits, logs, goals, mood
   Needs-->>App: theme + top lessons + goals + habits today
-  alt signed in, AI on, quota left
+  App->>App: composeTemplatePrayer() (always: final fallback + purpose/"not today"/nudges)
+  alt Premium, AI on, Gemini Nano available
+    App->>Nano: short prompt (style, theme, mood, ≤2 rules, goal, habits)
+    Nano-->>App: title line + paragraphs → parseNanoOutput()
+  else Premium, AI on, signed in, quota left
     App->>Fn: compact context (rules, "don't" lines, goal affirmations, habit names)
     Fn->>Fn: validate (zod), check day, reserve quota (transaction)
-    Fn->>Claude: claude-opus-5-5 · effort low · JSON schema · fallbacks "default"
+    Fn->>Claude: claude-haiku-4-5 · JSON schema
     Claude-->>Fn: {title, prayer, purposeLine, dontDoToday, nudges, focusTheme}
     Fn-->>App: prayer (also saved to users/{uid}/prayers/{day})
-  else otherwise
-    App->>App: composeTemplatePrayer() — personal, deterministic, offline
+  else free plan, or anything failed
+    App->>App: use the template prayer
   end
 ```
 
@@ -277,15 +295,25 @@ sequenceDiagram
   shows the signals to the user.
 - **Styles**: secular affirmation (default), spiritual (God / the Universe), or *my faith* with the
   name the user prays to.
-- **Privacy**: only if–then rules, "don't" lines, goal affirmations, habit names and the mood are
-  sent. Stories, reasons and feelings never leave the phone (covered by a unit test).
-- **Cost** (estimate at list price): ~1.5 K input + ~0.5 K output tokens per prayer at $4 / $20 per
-  MTok, plus a little thinking at `low` effort ≈ 2–4 ¢ per prayer. That is about $1 per Premium user
-  per month at one prayer a day (up to ~$3 if every rewrite is used), well inside the $20 price.
-  The system prompt is kept byte-stable; it is below the minimum cacheable size, so prompt caching
-  isn't used.
-- **Failure modes**: refusal (`stop_reason: "refusal"`) or API errors refund the reserved quota and
-  the app silently falls back to the template prayer.
+- **Gemini Nano** (`modules/gemini-nano`): a Java engine over `GenerativeModelFutures` (checkStatus,
+  download, generateContent) with a thin Kotlin Expo module. At startup, trial/Premium users' phones
+  are checked and the model is downloaded in the background through AICore; free users never
+  trigger a download. Generation uses temperature 0.7, topK 16, 400 output tokens and a 20 s
+  timeout. The small model writes only the title and paragraphs; `parseNanoOutput()` strips
+  markdown and quotes, drops a cut-off last sentence and rejects meta text ("as an AI…"), too
+  short or too long output. The purpose line, "not today" lines and nudges come from the
+  deterministic composer. On-device rewrites use no quota. Settings → Daily prayer shows where the
+  prayer is written (ready / downloading / download button / cloud).
+- **Privacy**: on-device prayers send nothing. For the cloud, only if–then rules, "don't" lines,
+  goal affirmations, habit names and the mood are sent. Stories, reasons and feelings never leave
+  the phone (covered by a unit test).
+- **Cost** (list price, $1 / $5 per MTok for Haiku 4.5): ~1.5 K input + ~0.5 K output tokens ≈
+  $0.003–0.005 per cloud prayer, so about $0.12 per cloud Premium user per month at one prayer a
+  day (up to ~$0.36 if every rewrite is used). Free users and Gemini Nano phones cost $0. The system
+  prompt is below the minimum cacheable size, so prompt caching isn't used.
+- **Failure modes**: Gemini Nano busy, quota-limited, timed out or unusable → cloud → template.
+  Cloud refusal (`stop_reason: "refusal"`) or API errors refund the reserved quota and the app
+  falls back to the template prayer. Free-plan calls to the function are rejected server-side.
 
 ## 10. Reminder engine
 
@@ -323,7 +351,7 @@ without opening the app. Permissions: POST_NOTIFICATIONS, SCHEDULE_EXACT_ALARM, 
 | Lessons | 25 | Unlimited |
 | Location reminders | 1 | Up to 95 |
 | Scheduled reminders | 3 | Unlimited |
-| AI daily prayer | 3 / week (template other days) | Daily + 2 rewrites |
+| Daily prayer | Composed on the phone (mood re-writes included) | AI-written daily (Gemini Nano on the phone or the cloud) + 2 rewrites |
 | Habit history (month view) | 3 months | Full |
 | Insights | Basic | Full |
 | Ads | Yes | None |
@@ -334,8 +362,8 @@ without opening the app. Permissions: POST_NOTIFICATIONS, SCHEDULE_EXACT_ALARM, 
   lesson screens. Non-personalised by default, PG content rating, UMP consent.
 - **Downgrade**: nothing is deleted. The user picks which 5 habits / 10 goals stay active; the rest
   are *paused* (read-only) until they upgrade.
-- **Enforcement**: limits in store actions (client); the AI quota on the server, because it is the
-  only limit that costs money.
+- **Enforcement**: limits in store actions (client); the cloud AI quota on the server, because it
+  is the only limit that costs money (free plan: 0 cloud prayers).
 
 ## 12. Security & privacy
 
@@ -384,40 +412,49 @@ src/
   app/                  expo-router routes (tabs, stack screens, settings, ui-kit)
   domain/               pure logic + types (+ __tests__)
   store/                zustand store, hooks/selectors, defaults, demo data (+ __tests__)
-  services/             firebase, sync, prayer, notifications, geofence, lock, billing,
-                        ads(.native), background, haptics
+  services/             firebase, sync, prayer, onDeviceAi, notifications, geofence, lock,
+                        billing, ads(.native), background, haptics
   features/             screen-specific components (habits, lessons, goals, prayer, today)
   components/           app-level components (TabBar, LockOverlay, Upsell, AdBanner, BrandMark)
   ui/                   design-system components
   theme/                tokens + ThemeProvider
   content/quotes.ts     nudge library
   config/env.ts         EXPO_PUBLIC_* configuration
+modules/gemini-nano/    local Expo module: Gemini Nano (Java engine + Kotlin module + TS wrapper)
 functions/              Firebase Cloud Functions (TypeScript)
 firestore.rules · firebase.json · eas.json · app.json
 ```
 
 ## 15. Testing & verification
 
-- **Unit tests (Jest, 50 tests)**: dates (leap years, DST, ISO weeks), rolling 7-day rings,
+- **Unit tests (Jest, 79 tests)**: dates (leap years, DST, ISO weeks), rolling 7-day rings,
   per-habit stats and streaks, Previous/Now/Next selection, weekly distribution, spaced review,
   beginner mode, Goldilocks, number scaling, shuffle-bag and quote cycle, pricing limits and
   downgrade, needs analyzer, template prayer (incl. the privacy guarantee), reminder planner, store
-  limit enforcement, AI quota, and component tests for rings and stat tiles.
-- **Functions tests** (`node --test`): tiers, plausible days, RevenueCat mapping, schema and output
-  normalisation.
+  limit enforcement, AI quota, component tests for rings and stat tiles, and the prayer engine:
+  engine order for every plan/status, Gemini Nano prompt and output parsing, and the prayer service
+  with the native module mocked as available, unavailable, failing, slow and unusable (each
+  fallback, no quota for on-device rewrites, one shared generation for concurrent calls).
+- **Native module**: the Java engine was compiled against stubs of the ML Kit API; Kotlin and the
+  real ML Kit artifact are compiled only by `eas build` (no Android SDK in CI here). `expo prebuild`
+  confirms the module is autolinked and `android.minSdkVersion=26`.
+- **Functions tests** (`node --test`): tiers (free plan: 0 cloud prayers), plausible days,
+  RevenueCat mapping, schema and output normalisation.
 - **Static checks**: `tsc --noEmit`, `expo lint` (incl. React Compiler rules) — both clean.
 - **Bundles**: `expo export -p web` and `-p android` both succeed.
 - **Visual**: the web build was driven with headless Chromium at 412 × 915 in dark and light themes
   with sample data; zero console errors; screenshots in `docs/screenshots`.
 - **Manual on device** (not possible in CI here): notification delivery and actions, exact-alarm
   behaviour, geofences (`adb emu geo fix <lng> <lat>`), Doze (`adb shell dumpsys deviceidle
-  force-idle`), biometric lock, Play Billing license testers, AdMob test ads.
+  force-idle`), biometric lock, Play Billing license testers, AdMob test ads, and Gemini Nano on a
+  supported phone (the native module is compiled only by `eas build`; see README).
 
 ## 16. Play Store checklist
 
 - [ ] Background location declaration + prominent in-app disclosure (built) + demo video.
 - [ ] Data safety form: personal info (name, email), app activity, location (on device only),
-      AI processing (summary sent to the prayer function), ads SDK.
+      AI processing (summary sent to the prayer function, only on Premium phones without
+      Gemini Nano), ads SDK.
 - [ ] "Contains ads" flag; ads never in sensitive flows; content rating questionnaire.
 - [ ] Subscription listing: $20 monthly base plan, clear price/renewal/cancel terms (on paywall).
 - [ ] Privacy policy URL (`EXPO_PUBLIC_PRIVACY_URL`) and terms URL.

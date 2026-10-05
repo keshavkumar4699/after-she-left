@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.aftersheleft'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.gemininano"
+  defaultConfig {
+    versionCode 1
+    versionName '1.0.0'
+  }
+}
+
+dependencies {
+  // ML Kit GenAI Prompt API: Gemini Nano through Android AICore (requires minSdk 26).
+  implementation "com.google.mlkit:genai-prompt:1.0.0-beta2"
+}

@@ -123,14 +123,19 @@ describe('lessons', () => {
 });
 
 describe('AI prayer quota', () => {
-  it('gives free users 3 AI prayers a week and no rewrites', () => {
+  it('gives free users no cloud AI prayers (they get the on-phone composer)', () => {
     endTrial();
     const s = useStore.getState();
-    expect(s.aiAllowance(true).ok).toBe(false);
-    for (let i = 0; i < 3; i++) {
-      expect(useStore.getState().aiAllowance(false).ok).toBe(true);
-      useStore.getState().recordAiUse(false);
+    expect(s.aiAllowance(true)).toEqual({ ok: false, remaining: 0 });
+    expect(s.aiAllowance(false)).toEqual({ ok: false, remaining: 0 });
+  });
+
+  it('gives trial and Premium users a daily cloud prayer and 2 rewrites a day', () => {
+    for (let i = 0; i < 2; i++) {
+      expect(useStore.getState().aiAllowance(true).ok).toBe(true);
+      useStore.getState().recordAiUse(true);
     }
-    expect(useStore.getState().aiAllowance(false)).toEqual({ ok: false, remaining: 0 });
+    expect(useStore.getState().aiAllowance(true)).toEqual({ ok: false, remaining: 0 });
+    expect(useStore.getState().aiAllowance(false)).toEqual({ ok: true, remaining: 7 });
   });
 });

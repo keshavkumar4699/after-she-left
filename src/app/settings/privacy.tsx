@@ -95,7 +95,7 @@ export default function PrivacySettings() {
 
       <FormSection
         title="AI daily prayer"
-        description="When on (and you are signed in), a short summary is sent to write your prayer: your if–then rules, “not today” lines, goal affirmations and today’s habit names. Stories, reasons and feelings stay on your phone.">
+        description="Premium only. On phones with Gemini Nano the prayer is written on the phone and nothing is sent. On other phones (when you are signed in) a short summary is sent to write it: your if–then rules, “not today” lines, goal affirmations and today’s habit names. Stories, reasons and feelings stay on your phone. Free prayers are always composed on your phone.">
         <ListItem
           icon="star-four-points-outline"
           title="Use AI for my prayer"

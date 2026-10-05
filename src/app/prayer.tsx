@@ -6,6 +6,7 @@ import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 
 import { analyzeNeeds, THEME_LABELS } from '@/domain/needs';
 import type { Mood } from '@/domain/types';
+import { isAiWritten, SOURCE_LABELS } from '@/features/prayer/source';
 import { ensureTodayPrayer } from '@/services/prayer';
 import { useCheckins, useCircumstances, useGoals, useHabitLogs, useHabits, useMistakes, usePlanInfo, useToday } from '@/store/hooks';
 import { useStore } from '@/store/useStore';
@@ -29,7 +30,6 @@ export default function PrayerScreen() {
   const updatePrayer = useStore((s) => s.updatePrayer);
   const setMood = useStore((s) => s.setMood);
   const todayMood = useStore((s) => (s.todayMood?.day === today ? s.todayMood.mood : null));
-  const aiAllowance = useStore((s) => s.aiAllowance);
   const { tier } = usePlanInfo();
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState(false);
@@ -50,16 +50,16 @@ export default function PrayerScreen() {
     [mistakes, checkins, circumstances, habits, logs, goals, todayMood, today],
   );
 
+  /** A new mood re-writes the prayer on every plan; "Rewrite" on its own is a Premium feature. */
   const regenerate = async (mood?: Mood) => {
-    const allowance = aiAllowance(true);
-    if (!allowance.ok && tier === 'free') {
+    if (!mood && tier === 'free') {
       router.push('/paywall');
       return;
     }
     setBusy(true);
     try {
       const res = await ensureTodayPrayer({ regenerate: true, mood: mood ?? todayMood });
-      toast(res.prayer.source === 'ai' ? 'A new prayer, written for today' : 'Rewritten from your lessons and goals', { icon: 'auto-fix' });
+      toast(isAiWritten(res.prayer.source) ? 'A new prayer, written for today' : 'Rewritten from your lessons and goals', { icon: 'auto-fix' });
     } finally {
       setBusy(false);
     }
@@ -99,7 +99,15 @@ export default function PrayerScreen() {
             <Skeleton height={16} />
             <Skeleton height={16} />
             <Skeleton width="80%" height={16} />
-            <Button label="Write today's prayer" icon="auto-fix" onPress={() => regenerate()} loading={busy} />
+            <Button
+              label="Write today's prayer"
+              icon="auto-fix"
+              loading={busy}
+              onPress={async () => {
+                setBusy(true);
+                await ensureTodayPrayer().finally(() => setBusy(false));
+              }}
+            />
           </View>
         ) : (
           <Animated.View entering={FadeIn.duration(400)} style={{ gap: 24 }}>
@@ -107,7 +115,7 @@ export default function PrayerScreen() {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Icon name="hands-pray" size={18} color={colors.violet} />
                 <Text variant="overline" tone="muted">
-                  {THEME_LABELS[prayer.theme]} · {prayer.source === 'ai' ? 'Written for you' : 'From your lessons'}
+                  {THEME_LABELS[prayer.theme]} · {SOURCE_LABELS[prayer.source]}
                 </Text>
               </View>
               <Text variant="display">{prayer.title}</Text>

@@ -16,7 +16,11 @@ import {
 
 export const ANTHROPIC_API_KEY = defineSecret('ANTHROPIC_API_KEY');
 
-const MODEL = 'claude-opus-5-5';
+/**
+ * Cloud fallback for Premium phones that can't run Gemini Nano on-device. Haiku is fast and
+ * cheap (about $0.003–0.005 per prayer) and supports structured outputs.
+ */
+const MODEL = 'claude-haiku-4-5';
 
 /** Stable system prompt (kept byte-identical between calls). */
 const SYSTEM_PROMPT = `You write a short daily prayer for one person, in their own voice.
@@ -48,7 +52,8 @@ function userMessage(ctx: PrayerContext): string {
 
 /**
  * Callable: generate today's prayer with Claude.
- *  - Auth required; quota enforced server-side (free: 3/week, no rewrites; trial/premium: daily + 2 rewrites).
+ *  - Auth required; quota enforced server-side (trial/premium: daily + 2 rewrites; free plan: none,
+ *    free prayers are composed on the phone).
  *  - Idempotent for the day: without `regenerate`, an existing AI prayer is returned at no cost.
  */
 export const generateDailyPrayer = onCall(
@@ -81,6 +86,7 @@ export const generateDailyPrayer = onCall(
       const snap = await tx.get(userRef);
       const data = snap.data() ?? {};
       const limits = aiLimits(effectiveTier(data.plan as ServerPlan | undefined, now, createdAt));
+      if (limits.perWeek === 0) throw new HttpsError('permission-denied', 'AI prayers are part of Premium.');
       const usage = (data.usage ?? {}) as { aiWeek?: string; aiCount?: number; regenDay?: string; regenCount?: number };
       if (regenerate) {
         const used = usage.regenDay === context.day ? (usage.regenCount ?? 0) : 0;
@@ -105,19 +111,16 @@ export const generateDailyPrayer = onCall(
     const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
     let content: ReturnType<typeof toPrayerContent>;
     try {
-      const response = await client.beta.messages.create({
+      const response = await client.messages.create({
         model: MODEL,
-        max_tokens: 16000,
-        // Server-side fallback: if a safety classifier declines, Anthropic retries on its recommended model.
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
-        output_config: { effort: 'low', format: { type: 'json_schema', schema: PRAYER_JSON_SCHEMA } },
+        max_tokens: 2000,
+        output_config: { format: { type: 'json_schema', schema: PRAYER_JSON_SCHEMA } },
         system: SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userMessage(context) }],
       });
       if (response.stop_reason === 'refusal') throw new HttpsError('failed-precondition', 'The prayer could not be written today.');
       if (response.stop_reason === 'max_tokens') throw new HttpsError('internal', 'The prayer was cut off.');
-      const text = response.content.find((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text')?.text ?? '';
+      const text = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text')?.text ?? '';
       const output = PrayerOutputSchema.safeParse(JSON.parse(text));
       if (!output.success) throw new HttpsError('internal', 'Unexpected prayer format.');
       content = toPrayerContent(output.data);

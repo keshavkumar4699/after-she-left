@@ -25,9 +25,15 @@ The full product and engineering design is in **[BLUEPRINT.md](BLUEPRINT.md)**.
 - **Goals**: specific date, time, place and measure, an "already achieved" affirmation, milestones
   and linked habits. Only real dates can be picked (29 Feb exists only in leap years).
 - **Daily prayer**: secular affirmation by default (or spiritual / your faith), built from your
-  lessons, goals and habits. AI-written via Claude when signed in; composed on the phone otherwise.
+  lessons, goals and habits. Three engines, cheapest and most private first:
+  - Free plan: composed on the phone ($0, nothing sent).
+  - Premium on supported phones (Pixel 10, Galaxy S24/S25…): written by **Gemini Nano** on the
+    phone ($0, nothing sent).
+  - Premium on other phones: written by **Claude Haiku 4.5** in the cloud (about $0.004 a prayer).
+
+  Any failure falls back to the next engine, so there is always a prayer.
 - **Pricing**: 14-day free trial → **$20/month** Premium, or free with ads and limits (5 habits,
-  10 goals, 25 lessons, 1 place reminder, 3 scheduled reminders, 3 AI prayers a week).
+  10 goals, 25 lessons, 1 place reminder, 3 scheduled reminders, prayers composed on the phone).
 - **Privacy**: fingerprint/PIN lock, hide from recents and screenshots, private notification text,
   local-first storage, JSON export.
 - **Modern UI**: a dark-first "Calm night" design system with a light theme. Every component is
@@ -54,8 +60,8 @@ On the welcome screen, **Explore with sample data** loads realistic examples.
 
 ### Android builds
 
-Notifications, geofences, biometrics, AdMob and RevenueCat need a **development build** (they are
-not all in Expo Go):
+Notifications, geofences, biometrics, AdMob, RevenueCat and Gemini Nano need a **development
+build** (they are not all in Expo Go):
 
 ```bash
 npx eas-cli@latest login
@@ -63,6 +69,13 @@ npx eas-cli@latest build -p android --profile development   # dev client APK
 npx eas-cli@latest build -p android --profile preview       # installable APK
 npx eas-cli@latest build -p android --profile production    # Play Store AAB
 ```
+
+**Gemini Nano** is a local Expo module in `modules/gemini-nano` (autolinked). It needs
+`minSdkVersion 26`, set in `app.json` through `expo-build-properties`. Test it with a development
+build on a supported phone (Pixel 10, Galaxy S24/S25 and others with Android AICore): sign in to a
+trial or Premium account, open **Me → Daily prayer** and check that it says *On this phone (Gemini
+Nano)*. The first download happens in the background over Wi-Fi. On other phones, the web and
+Expo Go, the module reports *unavailable* and the cloud or template engine is used.
 
 ## Optional services
 
@@ -83,7 +96,7 @@ Copy `.env.example` to `.env.local` and fill in what you use. Each service turns
    firebase deploy --only firestore:rules,functions
    ```
 
-Functions: `generateDailyPrayer` (Claude `claude-opus-5-5`, quota enforced on the server),
+Functions: `generateDailyPrayer` (Claude `claude-haiku-4-5`, Premium only, quota enforced on the server),
 `onUserCreated` (starts the 14-day trial), `deleteAccount`, `revenuecatWebhook`.
 
 ### RevenueCat ($20/month subscription)
@@ -106,6 +119,7 @@ Development builds always use Google's test ads.
 ```
 src/app         routes (expo-router)          src/domain     pure logic + tests
 src/ui          design-system components       src/store      zustand store, hooks, sample data
-src/features    screen components             src/services   notifications, geofence, lock, billing, ads, sync, prayer
-functions/      Firebase Cloud Functions       docs/          screenshots
+src/features    screen components             src/services   notifications, geofence, lock, billing, ads, sync, prayer, onDeviceAi
+functions/      Firebase Cloud Functions       modules/       local Expo module: gemini-nano
+docs/           screenshots
 ```

@@ -33,7 +33,7 @@ export interface Settings {
   prayerStyle: PrayerStyle;
   prayerAddressee: string;
   prayerTime: TimeOfDay;
-  /** Opt-in: send a minimal context to the AI prayer function. */
+  /** Premium: let AI write the prayer (Gemini Nano on the phone, else the cloud function). */
   aiPrayer: boolean;
   reviewTime: TimeOfDay;
   quietHours: { start: TimeOfDay; end: TimeOfDay };
